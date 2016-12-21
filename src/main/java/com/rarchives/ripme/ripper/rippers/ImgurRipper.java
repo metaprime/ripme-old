@@ -460,6 +460,15 @@ public class ImgurRipper extends AlbumRipper {
             this.url = new URL("http://imgur.com/a/" + gid);
             return gid;
         }
+        p = Pattern.compile("^https?://(www\\.|m\\.)?imgur\\.com/([a-zA-Z0-9]{5,}).*$");
+        m = p.matcher(url.toExternalForm());
+        if (m.matches()) {
+            // Imgur single image (consider this a one-image album with a different URL)
+            albumType = ALBUM_TYPE.ALBUM;
+            String gid = m.group(m.groupCount());
+            this.url = new URL("http://imgur.com/" + gid);
+            return gid;
+        }
         p = Pattern.compile("^https?://([a-zA-Z0-9\\-]{3,})\\.imgur\\.com/?$");
         m = p.matcher(url.toExternalForm());
         if (m.matches()) {

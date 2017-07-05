@@ -71,6 +71,29 @@ public class SankakuComplexRipper extends AbstractHTMLRipper {
     @Override
     public List<String> getURLsFromPage(Document doc) {
         List<String> imageURLs = new ArrayList<String>();
+        // Image URLs are basically thumbnail URLs with a different domain, a simple
+        // path replacement, and a ?xxxxxx post ID at the end (obtainable from the href)
+        for (Element thumbSpan : doc.select("div.content > div > span.thumb")) {
+            String postId = thumbSpan.attr("id").replaceAll("p", "");
+            Element thumb = thumbSpan.getElementsByTag("img").first();
+            String image = thumb.attr("abs:src")
+                                .replace(".sankakucomplex.com/data/preview",
+                                         "s.sankakucomplex.com/data") + "?" + postId;
+            imageURLs.add(image);
+        }
+        return imageURLs;
+    }
+
+    @Override
+    public void downloadURL(URL url, int index) {
+        // This method is called on each of the urls returned from getURLsFromPage.
+        // Mock up the URL of the post page based on the post ID at the end of the URL.
+        String postId = url.toExternalForm().replaceAll(".*\\?", "");
+        addURLToDownload(url, postId + "_", "", "", null);
+    }
+
+    private List<String> getPostURLsFromPage(Document doc) {
+        List<String> imageURLs = new ArrayList<String>();
         for (Element thumbSpan : doc.select("div.content > div > span.thumb")) {
             String postId = thumbSpan.attr("id").replaceAll("p", "");
             String domain = doc.location().replaceFirst("(.*\\.sankakucomplex.com).*", "$1");
@@ -81,8 +104,7 @@ public class SankakuComplexRipper extends AbstractHTMLRipper {
         return imageURLs;
     }
 
-    @Override
-    public void downloadURL(URL url, int index) {
+    private void downloadFromPost(URL url) {
         try {
             Document postDoc = Http.url(url).cookies(cookies).get();
 
@@ -102,17 +124,44 @@ public class SankakuComplexRipper extends AbstractHTMLRipper {
             url = new URL(imageLink);
 
             // queue the picture to download so we do something useful during the long delay below
-            // Mock up the URL of the post page based on the post ID at the end of the URL.
-            String postId = url.toExternalForm().replaceAll(".*\\?", "");
-            addURLToDownload(url, postId + "_", "", "", null);
+            downloadURL(url, 0);
 
             // We're making a lot of extra requests now that we have to check every page
             // to find the actual URL instead of guessing the file extension.
             // Delay between requests to ensure we don't get rate-limited.
-            // 2000 was barely not enough, so using 2500 for now.
-            sleep(2500);
+            // 2500 was not enough when checking all pages, so using 3000 for now.
+            sleep(3000);
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void downloadErrored(URL url, String reason) {
+        // Because of rate-limiting, we can't afford to check every single post URL.
+        // Even with delays, we are still just making too many requests per minute.
+        // So we would have to make the ripper crazily slow, or we can get clever here.
+        // The majority of the time, jpg is actually the right choice.
+        // Initially, we try to download jpg. If jpg fails to download correctly,
+        // then fallback on checking the post for the actual image URL.
+
+        // If we were trying to download a jpg and we got an error, try checking the corresponding post instead
+        if (url.getPath().matches("\\.jpg\\?")) {
+            String postId = url.getPath().replaceFirst("^.*\\?(\\d+)$", "$1");
+            String domain = albumDoc.location().replaceFirst("(.*\\.sankakucomplex.com).*", "$1");
+            String postUrl = domain + "/post/show/" + postId;
+
+            itemsPending.remove(url);
+            try {
+                logger.info("Checking post URL: " + postUrl);
+                downloadFromPost(new URL(postUrl));
+            } catch (MalformedURLException e) {
+                super.downloadErrored(url, reason);
+                return;
+            }
+        } else {
+            // If we tried to download a post and it failed, then we give up
+            super.downloadErrored(url, reason);
         }
     }
 

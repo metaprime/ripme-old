@@ -70,52 +70,50 @@ public class SankakuComplexRipper extends AbstractHTMLRipper {
 
     @Override
     public List<String> getURLsFromPage(Document doc) {
-        // We will rip pictures during the delay so we will just call to
-        // downloadURL directly instead of returning a list of URLs.
         List<String> imageURLs = new ArrayList<String>();
-
         for (Element thumbSpan : doc.select("div.content > div > span.thumb")) {
             String postId = thumbSpan.attr("id").replaceAll("p", "");
             String domain = doc.location().replaceFirst("(.*\\.sankakucomplex.com).*", "$1");
             String postUrl = domain + "/post/show/" + postId;
             logger.info("post URL is: " + postUrl);
-
-            try {
-                Document postDoc = Http.url(postUrl).cookies(cookies).get();
-
-                String imageLink = postDoc.select("div#post-content a#image-link").attr("href");
-                if (imageLink.equals("")) {
-                    imageLink = postDoc.select("#image").attr("src");
-                }
-                if (imageLink.equals("")) {
-                    logger.error("Couldn't find an image URL");
-                    continue; // don't add picture
-                }
-
-                imageLink = "http:" + imageLink;
-                logger.info("image link is: " + imageLink);
-
-                // queue the picture to download so we do something useful during the long delay below
-                downloadURL(new URL(imageLink), 0);
-
-                // We're making a lot of extra requests now that we have to check every page
-                // to find the actual URL instead of guessing the file extension.
-                // Delay between requests to ensure we don't get rate-limited.
-                // 1000 wasn't enough, so using 2000 for now.
-                sleep(2000);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
+            imageURLs.add(postUrl);
         }
-
-        return null; // see comment above
+        return imageURLs;
     }
 
     @Override
     public void downloadURL(URL url, int index) {
-        // Mock up the URL of the post page based on the post ID at the end of the URL.
-        String postId = url.toExternalForm().replaceAll(".*\\?", "");
-        addURLToDownload(url, postId + "_", "", "", null);
+        try {
+            Document postDoc = Http.url(url).cookies(cookies).get();
+
+            String imageLink = postDoc.select("div#post-content a#image-link").attr("href");
+            if (imageLink.equals("")) {
+                imageLink = postDoc.select("#image").attr("src");
+            }
+            if (imageLink.equals("")) {
+                logger.error("Couldn't find an image URL");
+                return; // nothing to download
+            }
+
+            imageLink = "http:" + imageLink; // imageLink is a full path to an image starting with "//"
+            logger.info("image link is: " + imageLink);
+
+            // create a new URL for the actual download
+            url = new URL(imageLink);
+
+            // queue the picture to download so we do something useful during the long delay below
+            // Mock up the URL of the post page based on the post ID at the end of the URL.
+            String postId = url.toExternalForm().replaceAll(".*\\?", "");
+            addURLToDownload(url, postId + "_", "", "", null);
+
+            // We're making a lot of extra requests now that we have to check every page
+            // to find the actual URL instead of guessing the file extension.
+            // Delay between requests to ensure we don't get rate-limited.
+            // 2000 was barely not enough, so using 2500 for now.
+            sleep(2500);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     @Override

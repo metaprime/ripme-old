@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.apache.log4j.Logger;
 import org.jsoup.Connection.Response;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
@@ -20,11 +21,14 @@ import com.rarchives.ripme.ripper.AbstractHTMLRipper;
 import com.rarchives.ripme.utils.Http;
 
 public class SankakuComplexRipper extends AbstractHTMLRipper {
+    public static Logger logger;
+
     private Document albumDoc = null;
     private Map<String,String> cookies = new HashMap<String,String>();
 
     public SankakuComplexRipper(URL url) throws IOException {
         super(url);
+        logger = Logger.getLogger(SankakuComplexRipper.class);
     }
 
     @Override
@@ -39,13 +43,14 @@ public class SankakuComplexRipper extends AbstractHTMLRipper {
 
     @Override
     public String getGID(URL url) throws MalformedURLException {
-        Pattern p = Pattern.compile("^https?://([a-zA-Z0-9]+\\.)?sankakucomplex\\.com/.*tags=([^&]+).*$");
+        Pattern p = Pattern.compile("^https?://(?:([a-zA-Z0-9]+)\\.)?sankakucomplex\\.com/.*tags=([^&]+).*$");
         Matcher m = p.matcher(url.toExternalForm());
         if (m.matches()) {
+            String tagName = m.group(1) + "_" + m.group(2);
             try {
-                return URLDecoder.decode(m.group(1), "UTF-8");
+                return URLDecoder.decode(tagName, "UTF-8");
             } catch (UnsupportedEncodingException e) {
-                throw new MalformedURLException("Cannot decode tag name '" + m.group(1) + "'");
+                throw new MalformedURLException("Cannot decode tag name '" + tagName + "'");
             }
         }
         throw new MalformedURLException("Expected sankakucomplex.com URL format: " +
@@ -65,18 +70,45 @@ public class SankakuComplexRipper extends AbstractHTMLRipper {
 
     @Override
     public List<String> getURLsFromPage(Document doc) {
+        // We will rip pictures during the delay so we will just call to
+        // downloadURL directly instead of returning a list of URLs.
         List<String> imageURLs = new ArrayList<String>();
-        // Image URLs are basically thumbnail URLs with a different domain, a simple
-        // path replacement, and a ?xxxxxx post ID at the end (obtainable from the href)
+
         for (Element thumbSpan : doc.select("div.content > div > span.thumb")) {
             String postId = thumbSpan.attr("id").replaceAll("p", "");
-            Element thumb = thumbSpan.getElementsByTag("img").first();
-            String image = thumb.attr("abs:src")
-                                .replace(".sankakucomplex.com/data/preview",
-                                         "s.sankakucomplex.com/data") + "?" + postId;
-            imageURLs.add(image);
+            String domain = doc.location().replaceFirst("(.*\\.sankakucomplex.com).*", "$1");
+            String postUrl = domain + "/post/show/" + postId;
+            logger.info("post URL is: " + postUrl);
+
+            try {
+                Document postDoc = Http.url(postUrl).cookies(cookies).get();
+
+                String imageLink = postDoc.select("div#post-content a#image-link").attr("href");
+                if (imageLink.equals("")) {
+                    imageLink = postDoc.select("#image").attr("src");
+                }
+                if (imageLink.equals("")) {
+                    logger.error("Couldn't find an image URL");
+                    continue; // don't add picture
+                }
+
+                imageLink = "http:" + imageLink;
+                logger.info("image link is: " + imageLink);
+
+                // queue the picture to download so we do something useful during the long delay below
+                downloadURL(new URL(imageLink), 0);
+
+                // We're making a lot of extra requests now that we have to check every page
+                // to find the actual URL instead of guessing the file extension.
+                // Delay between requests to ensure we don't get rate-limited.
+                // 1000 wasn't enough, so using 2000 for now.
+                sleep(2000);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
-        return imageURLs;
+
+        return null; // see comment above
     }
 
     @Override

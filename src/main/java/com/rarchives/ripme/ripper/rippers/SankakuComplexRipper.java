@@ -123,7 +123,7 @@ public class SankakuComplexRipper extends AbstractHTMLRipper {
             // create a new URL for the actual download
             url = new URL(imageLink);
 
-            // queue the picture to download so we do something useful during the long delay below
+            // queue the picture to download so we do something useful during the long delays
             downloadURL(url, 0);
 
             // We're making a lot of extra requests now that we have to check every page
@@ -146,8 +146,10 @@ public class SankakuComplexRipper extends AbstractHTMLRipper {
         // then fallback on checking the post for the actual image URL.
 
         // If we were trying to download a jpg and we got an error, try checking the corresponding post instead
-        if (url.getPath().matches("\\.jpg\\?")) {
-            String postId = url.getPath().replaceFirst("^.*\\?(\\d+)$", "$1");
+        if (url.toExternalForm().contains(".jpg?")) {
+            logger.info("+++ Attempting to recover from error (URL: " + url.toExternalForm() + ")");
+
+            String postId = url.toExternalForm().replaceFirst("^.*\\?(\\d+)$", "$1");
             String domain = albumDoc.location().replaceFirst("(.*\\.sankakucomplex.com).*", "$1");
             String postUrl = domain + "/post/show/" + postId;
 
@@ -160,6 +162,8 @@ public class SankakuComplexRipper extends AbstractHTMLRipper {
                 return;
             }
         } else {
+            logger.error("!!! Could not recover from error (URL: " + url.toExternalForm() + ")");
+
             // If we tried to download a post and it failed, then we give up
             super.downloadErrored(url, reason);
         }
